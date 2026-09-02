@@ -1,0 +1,81 @@
+version: '3.8'
+
+services:
+  # --- APACHE FLINK INFRASTRUCTURE ---
+  flink-jobmanager:
+    image: flink:1.18-scala_2.12
+    container_name: flink-jobmanager
+    ports:
+      - "8081:8081" # Flink Dashboard / REST API Web Routing Port
+    command: jobmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+    volumes:
+      - ../backend/target:/opt/flink/usrlib:ro
+      - ./flink:/opt/flink/pipelines:ro
+    networks:
+      - flink-network
+
+  flink-taskmanager:
+    image: flink:1.18-scala_2.12
+    container_name: flink-taskmanager
+    depends_on:
+      - flink-jobmanager
+    command: taskmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 4
+    networks:
+      - flink-network
+
+  # --- KAFKA INGESTION TIER ---
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+    networks:
+      - flink-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    networks:
+      - flink-network
+
+  # --- POSTGRES ANALYTICS SINK DATA STORE ---
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres-sink
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password123
+      POSTGRES_DB: analytics_db
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init-schemas.sql:/docker-entrypoint-initdb.d/init-schemas.sql:ro
+    networks:
+      - flink-network
+
+networks:
+  flink-network:
+    driver: bridge
+
+volumes:
+  pgdata:
