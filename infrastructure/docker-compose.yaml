@@ -1,10 +1,11 @@
-version: '3.8'
-
 services:
   # --- APACHE FLINK INFRASTRUCTURE ---
   flink-jobmanager:
-    image: flink:1.18-scala_2.12
+    image: flink:2.2.1-java17
     container_name: flink-jobmanager
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
     ports:
       - "8081:8081" # Flink Dashboard / REST API Web Routing Port
     command: jobmanager
@@ -19,7 +20,7 @@ services:
       - flink-network
 
   flink-taskmanager:
-    image: flink:1.18-scala_2.12
+    image: flink:2.2.1-java17
     container_name: flink-taskmanager
     depends_on:
       - flink-jobmanager
@@ -54,6 +55,29 @@ services:
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "kafka:29092"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - flink-network
+
+  # Ensures the 'orders' topic exists before the Flink job reads/writes to it
+  kafka-init:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command: >
+      "kafka-topics --create --if-not-exists
+      --topic orders
+      --bootstrap-server kafka:29092
+      --partitions 1
+      --replication-factor 1"
     networks:
       - flink-network
 
