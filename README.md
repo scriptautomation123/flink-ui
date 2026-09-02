@@ -78,6 +78,31 @@ META-INF/MANIFEST.MF — every jar has one; you already have ManifestResourceTra
 docker compose down && docker compose up -d flink-jobmanager flink-taskmanager && sleep 5 && docker compose logs flink-taskmanager 2>&1 | grep -i "unknown module\|jdk.compiler" | head -5; echo "---done---"
 
 
+
+
+
+
+### cleanup
+
+cd /workspaces/flink-ui/infrastructure && docker compose down -v --remove-orphans
+docker volume prune -f 
+docker images --format "{{.Repository}}:{{.Tag}}" | grep -iE "flink|kafka|zookeeper|postgres" | xargs -r docker rmi
+rm -rf /workspaces/flink-ui/backend/target /workspaces/flink-ui/frontend/node_modules /workspaces/flink-ui/frontend/dist
+
+
+### to brign everything up
+
+cd frontend && npm install                 # regenerate node_modules
+cd ../backend && mvn clean package         # regenerate target/*.jar
+cd ../infrastructure && docker compose up -d   # re-pulls all images automatically
+cd /workspaces/flink-ui/bbackend
+mvn package
+cd /workspaces/flink-ui/infrastructure
+docker compose exec flink-jobmanager /opt/flink/bin/flink run \
+  -c com.studio.flink.SqlPipelineRunner \
+  /opt/flink/usrlib/sql-pipeline-runner-1.0-SNAPSHOT.jar \
+  /opt/flink/pipelines/pipeline.sql
+
 docker compose logs kafka-init && echo "---topics---" && docker compose exec kafka kafka-topics --list --bootstrap-server kafka:29092
 
 
@@ -96,3 +121,4 @@ EOF
 sku-1 and sku-2 both appear across multiple overlapping windows (expected — that's how HOP windows work: each event lands in every window it falls within)
 total_revenue sums correctly per product/window (e.g. sku-1 window 08:30–09:30 = 32.5, consistent with orders at 09:00 and 09:15 both landing in that window)
 total_orders shows 0 for every row — that's a pre-existing gap: pipeline.sql's INSERT INTO postgres_metrics only computes SUM(amount), never a COUNT(*) for total_orders, even though the target table has that column with a DEFAULT 0.
+
