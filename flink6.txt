@@ -1,0 +1,425 @@
+From: https://www.google.com/search?rlz=1CAUSPJ_enUS1232&sourceid=chrome&ie=UTF-8&amc=1&gs_lcrp=EgZjaHJvbWUqFQgFEAAYQhi0AhjqAhjwBRieBhj2BjISCAAQIxgnGOoCGPAFGJ4GGKIHMhIIARAjGCcY6gIY8AUYngYYogcyEggCECMYJxjqAhjwBRieBhiiBzISCAMQIxgnGOoCGPAFGJ4GGKIHMhIIBBAjGCcY6gIY8AUYngYYogcyFQgFEAAYQhi0AhjqAhjwBRieBhj2BtIBCjExNDM3ajBqMzGoAgawAgE&oq=&udm=50&cud=0&sxsrf=APpeQnvhC04YFjVwA6gNoFreEi4SyrD75g%3A1789707992940&ved=0CA4Q2_wOahgKEwjov8zqrfeWAxUAAAAAHQAAAAAQjA8&atvm=2&mstk=AUtExfBTMMJeYPBvXoC-S_74U9Ulqzhg8ZIrmqmDuYYZ9YV_Osy4hb95MU02YH979_qpHGEvX9Ol37GbLxqNGh1QRjii4ZhT_iVO6RAKEl47Rhhu_ilhI3JDspEx_MY0j6bzjaA9DfqzcVuou7blbn_tAsi13pzL5XstCSXr_m6O-yD1WgdmPX-DEIZ106aG5Ia2JJghlrsZkUppqnyL-zE1Ys1lMSpm_3OyaGijxfdV-Djx4uch3xlrB8sEOApcLIu7mx3FyrDmn1T3kw&mtid=vRqkao7GCaHZ5NoPivrGgQE&csuir=1&aep=26&q=Managing+External+Properties+in+Flink
+
+
+
+you asked
+
+message time: 2026-09-11 00:00:00
+
+so im running apache flink 23 on openshift in session mode. I will have to start jobs and because its runnning in sesion mode how to deal with external properties, trust stores and im running flink wihtotu an opreator in session mode
+
+
+googlesearch response
+
+To handle external properties, trust stores, and dynamic job submissions in Apache Flink on OpenShift in Session Mode without an operator, you must rely on standard OpenShift/Kubernetes resource objects (ConfigMaps and Secrets).
+
+Because the JobManager and TaskManagers are pre-allocated and shared by multiple jobs in Session Mode, they must be provisioned ahead of time with access to the necessary environment variables, properties, and certificates.
+
+
+1. Mounting Trust Stores and Certificates
+
+Since you aren't using an operator, you must manually define volume mounts in your JobManager (Deployment) and TaskManager (Deployment or StatefulSet) manifests.
+
+Create an OpenShift Secret containing your truststore.jks:
+
+bash
+
+oc create secret generic flink-truststore --from-file=truststore.jks=/path/to/truststore.jks
+
+Use code with caution.
+
+
+Mount the Secret as a Volume into your Flink Pod templates:
+
+yaml
+
+spec:   containers:   - name: flink-main-container     volumeMounts:     - name: truststore-vol       mountPath: /opt/flink/conf/security       readOnly: true # ...   volumes:   - name: truststore-vol     secret:       secretName: flink-truststore
+
+Use code with caution.
+
+
+Pass Java Trust Store properties to the JVM via the env.java.opts.all configuration in your global flink-conf.yaml (which resides inside your Flink ConfigMap):
+
+yaml
+
+env.java.opts.all: "-Djavax.net.ssl.trustStore=/opt/flink/conf/security/truststore.jks -Djavax.net.ssl.trustStorePassword=your_password"
+
+Use code with caution.
+
+
+2. Handling External Properties & Application Configurations
+
+Because you are running in Session Mode, passing unique external variables can be split between cluster-wide defaults and job-specific inputs.
+
+Approach A: Global Configuration (Cluster-Wide)
+
+For parameters shared across all jobs running in the session cluster, inject them directly into your JobManager and TaskManager Pods using ConfigMaps or Secrets mapped to environment variables:
+
+yaml
+
+env:   - name: DB_USER     valueFrom:       secretKeyRef:         name: db-credentials         key: username
+
+Use code with caution.
+
+Approach B: Job-Specific Configurations (Dynamic Submission)
+
+When you submit a specific job to the running session cluster, you can supply dynamic properties directly through the Flink CLI (flink run) via execution parameters:
+
+Using Flink Configuration Parameters (-D flag):
+
+bash
+
+flink run \   -m <jobmanager-rpc-address>:<port> \   -Dmy.custom.property=value \   /path/to/your/job.jar
+
+Use code with caution.
+
+Inside your Java/Scala application code, read these parameters via:
+
+java
+
+ParameterTool parameters = ParameterTool.fromSystemProperties();
+String value = parameters.get("my.custom.property");
+
+Use code with caution.
+
+
+Using Application Arguments:
+
+bash
+
+flink run \
+  -m <jobmanager-rpc-address>:<port> \
+  /path/to/your/job.jar --db-url "jdbc:postgresql://..." --timeout 30
+
+Use code with caution.
+
+Inside your Java/Scala application code:
+
+java
+
+ParameterTool parameters = ParameterTool.fromArgs(args);
+
+Use code with caution.
+
+
+3. Submitting Jobs to the Session Cluster on OpenShift
+
+Without an operator, you must route your job submission tool (CI/CD pipeline, jumpbox, or local CLI) to the OpenShift cluster.
+
+Option 1 (Internal Pod or Jenkins Pipeline): If submitting from a Pod inside the same OpenShift namespace, target the JobManager's Kubernetes internal service directly:
+
+bash
+
+flink run -m flink-jobmanager-service:8081 /opt/jobs/my-job.jar
+
+Use code with caution.
+
+
+Option 2 (External/Local Machine): If submitting from outside OpenShift, expose the Flink REST API port (default 8081) via an OpenShift Route. Once the route is active, target the public edge URL:
+
+bash
+
+flink run -m https://cluster.domain /path/to/local/job.jar
+
+Use code with caution.
+
+Would you like help setting up the YAML manifests for the standalone JobManager and TaskManager deployments on OpenShift? Alternatively, let me know if you need code snippets demonstrating how to read these parameters inside your Flink main method.
+
+Copied to clipboardFailed to copy to clipboard. Try again later.
+
+More
+
+
+you asked
+
+message time: 2026-09-11 00:00:00
+
+focus how im going to do the "flink run" an dpoint to external properties flies, keys stores truststorres, etc...
+
+
+googlesearch response
+
+When you are running flink run against an active Session Cluster on OpenShift, you cannot simply pass local file paths (like a local properties file or local keystore) because the actual execution happens on remote TaskManagers.
+
+Here is exactly how to package, point to, and execute flink run with external properties, keystores, and truststores.
+
+
+1. Passing External Properties Files
+
+If you have an external .properties or .yaml configuration file, you have two primary ways to pass it during flink run.
+
+Method A: Ship the file via the Flink CLI (Recommended)
+
+You can use the -yt or -yarnship equivalent for standalone deployments, but a cleaner way for standalone Session clusters is to pass the file as an application argument. To make sure the cluster can see it, you ship it with the -C (classpath) or wrap it into your application logic.
+Alternatively, the most common production pattern is to use Pipeline Distributed Cache so Flink automatically distributes the file to all TaskManagers:
+
+bash
+
+flink run \   -m https://cluster.domain \   -D pipeline.cached-files="name:my_config,path:hdfs://or-s3-or-http://path/to/app.properties" \   /local/path/to/your-job.jar
+
+Use code with caution.
+
+Inside your code, access it via: getRuntimeContext().getDistributedCache().getFile("my_config").
+
+Method B: Pass properties directly as CLI Arguments
+
+If the properties change per run, bypass a file entirely and pass them as program arguments:
+
+flink run \
+  -m https://cluster.domain \
+  /local/path/to/your-job.jar \
+  --properties-file-arg "dynamic_value" \
+  --db.url "jdbc:mysql://..."
+
+Use code with caution.
+
+
+2. Pointing to KeyStores and TrustStores During flink run
+
+Because SSL/TLS handshakes happen on the remote TaskManagers (e.g., when your job connects to an external Kafka or Database), the Keystores and Truststores must already exist on the OpenShift Pods, or be accessible via a network mount.
+
+Step 1: Pre-stage the stores via OpenShift Secrets
+
+Mount your keystore.jks and truststore.jks to a predictable path on all JobManagers and TaskManagers using an OpenShift Secret (e.g., mounted at /etc/flink/certs/).
+
+Step 2: Point your job to those paths during submission
+
+When you trigger flink run, use the -D flag to inject the JVM system properties or custom application properties telling your job exactly where to look inside the container environment.
+
+For Global JVM Traffic (e.g., HTTPS/REST calls made by your code):
+
+bash
+
+flink run \   -m https://cluster.domain \   -D env.java.opts.all="-Djavax.net.ssl.trustStore=/etc/flink/certs/truststore.jks -Djavax.net.ssl.trustStorePassword=changeit" \   /local/path/to/your-job.jar
+
+Use code with caution.
+
+For Specific Connectors (e.g., Apache Kafka):
+
+If your Flink job connects to a secured Kafka cluster, pass the container-side paths into your job configuration:
+
+bash
+
+flink run \   -m https://cluster.domain \   /local/path/to/your-job.jar \   --kafka.ssl.truststore.location "/etc/flink/certs/truststore.jks" \   --kafka.ssl.truststore.password "changeit" \   --kafka.ssl.keystore.location "/etc/flink/certs/keystore.jks" \   --kafka.ssl.keystore.password "changeit"
+
+Use code with caution.
+
+Inside your Java code, you would read these arguments using ParameterTool.fromArgs(args) and map them directly into your KafkaSource or KafkaSink configuration properties.
+
+
+Summary Checklist for your flink run Command
+
+bash
+
+flink run \   -m https://your-cluster.com \   -c com.example.YourFlinkMainClass \   -D env.java.opts.all="-Djavax.net.ssl.trustStore=/etc/flink/certs/truststore.jks" \   /local/path/to/your-compiled-job.jar \   --app.config.key1 "value1" \   --storage.ssl.path "/etc/flink/certs/keystore.jks"
+
+Use code with caution.
+
+To tailor the exact execution script, could you share:
+
+Which external services (e.g., Kafka, PostgreSQL, S3) your Flink job needs the truststore/keystore for?
+How you parse configurations inside your Java/Scala main method right now (e.g., ParameterTool, Configuration, or a custom framework)?
+
+Copied to clipboardFailed to copy to clipboard. Try again later.
+
+More
+
+
+you asked
+
+message time: 2026-09-11 00:00:00
+
+ok, but this will be a multi tenant cluster, how do i protect one set of job configs from another set of job configs?
+
+
+googlesearch response
+
+Because you are running a single shared Session Mode cluster without an operator, achieving strong multi-tenant security is fundamentally difficult. In a standard Flink Session cluster, all jobs share the same JVM processes (JobManager and TaskManagers) and run under the exact same Kubernetes ServiceAccount.
+
+This means if you mount separate tenant secrets (like truststores) into the cluster, Tenant A's running job can technically access Tenant B's mounted secrets or read other tenants' configuration parameters via JVM environment inspections or Java's reflection.
+
+To protect distinct sets of job configurations from one another in this architecture, you must implement the following safeguards:
+
+
+1. The Hard Truth About Flink Session Mode
+
+A Flink Session cluster does not have a native multi-tenant authorization boundary at the job execution level.
+
+Anyone with network access to the Flink REST API (flink run) can see all running configurations.
+Any job code executing inside the TaskManager has equal access to the local container filesystem and memory space.
+
+The Best Practice Alternative: If absolute cryptographic or configuration isolation is required between tenants, you should move away from a shared Session cluster and deploy Flink Application Mode. In Application Mode, each tenant gets their own dedicated JobManager and TaskManager Pods inside isolated OpenShift Namespaces, perfectly separating OpenShift Secrets, ConfigMaps, and configurations.
+
+If you must remain in a shared Session Mode cluster, apply the strategies below.
+
+
+2. Isolate Configuration File Delivery (CI/CD Pipeline Separation)
+
+Do not store multiple tenant configuration files or sensitive properties directly inside the TaskManager Pods. Instead, make the deployment pipeline the gatekeeper:
+
+Role-Based Access (RBAC) in CI/CD: Ensure Tenant A's engineers only have access to Tenant A's Git repository and pipeline (e.g., Tekton, Jenkins, or GitLab CI).
+
+
+Inject Secrets via Pipeline Environment Variables: Keep passwords, DB keys, and connection strings inside tenant-isolated pipeline environments. When the pipeline calls flink run, pass these configurations strictly as ephemeral program arguments rather than static files:
+
+bash
+
+# This runs inside Tenant A's isolated CI/CD worker flink run -m flink-route.apps.cluster.domain:443 /jars/tenant-a.jar \   --db.password "${TENANT_A_SECRET_PASS}" \   --kafka.username "tenant-a-user"
+
+Use code with caution.
+
+3. Namespace-Scoped Object Storage for Files & Stores
+
+If your jobs require distinct keystores, truststores, or heavy .properties files that cannot be converted to plain string arguments, do not mount them directly to the TaskManager storage volume. Use secure cloud/on-prem object storage (like an isolated MinIO bucket, AWS S3, or an internal secure file server) to act as a secure proxy.
+
+Secure the Object Storage: Provision separate folders/buckets per tenant and secure them with discrete access keys.
+
+
+Fetch Files Ephemerally via Flink Distributed Cache: When submitting the job, use Flink’s pipeline.cached-files configuration:
+
+bash
+
+flink run \   -m flink-route.apps.cluster.domain:443 \   -D pipeline.cached-files="tenant_truststore,s3://tenant-a-secure-bucket/certs/truststore.jks" \   /jars/tenant-a.jar
+
+Use code with caution.
+
+
+Flink will automatically stream that specific truststore file from the bucket straight into the TaskManager slot execution directory when Tenant A's job boots up, limiting cross-tenant exposure.
+
+4. Implement Code-Level Namespacing & Class Isolation
+
+Because jobs run in the same cluster, bad or malicious code from one tenant can interfere with another. Flink separates job classes using child-first classloaders, but you should mandate code patterns to protect configurations:
+
+Shaded Connectors: Ensure each tenant jar shades its respective dependencies (like Kafka or PostgreSQL drivers). If Tenant A and Tenant B use different versions of a secure client connector, shading prevents cross-contamination of client configurations inside the JVM class path.
+Encrypted Program Arguments: If you are highly concerned about a rogue user viewing other jobs' configurations in the plain-text Flink Web UI, encrypt your sensitive configuration properties before executing flink run. Have the job decrypt the properties inside its open() method using a key pulled securely from an external key vault (such as HashiCorp Vault or CyberArk) using a specific AppRole credential passed to the job.
+
+Copied to clipboardFailed to copy to clipboard. Try again later.
+
+More
+
+
+you asked
+
+message time: 2026-09-11 00:00:00
+
+what if i store everythign in vault? the issue is how do i versio my properties wiht my code ?
+
+
+googlesearch response
+
+Storing everything in HashiCorp Vault is the perfect way to solve the multi-tenant security problem on a shared Flink session cluster. Because Flink jobs execute code inside the TaskManager JVM, your code can dynamically fetch secrets at runtime using an ephemeral, scoped token.
+
+To solve your core challenge—versioning your configurations alongside your code while keeping secrets safe—you should adopt a "Pointer-to-Vault" architecture using GitOps principles.
+
+Here is exactly how to design and execute this workflow.
+
+
+1. The Strategy: Separate "Structure" from "Secrets"
+
+In Git (Versioned with Code): Store your application properties file (application.conf, config.yaml) directly in your code repository. However, replace all sensitive values, truststore passwords, and keys with Vault paths or placeholders.
+In Vault (Secure Engine): Store the actual passwords, keys, and base64-encoded truststores/keystores. Version control them using Vault's KV V2 engine or a secure Git-backed infrastructure-as-code repo (like Terraform).
+
+Example: Your Versioned config.yaml in Git
+
+yaml
+
+# Versioned directly in your jar / repository app:   tenant: "tenant-a"   database:     url: "jdbc:postgresql://://example.com"     # Pointer instead of raw secret     username_vault_path: "secret/data/tenant-a/db#username"     password_vault_path: "secret/data/tenant-a/db#password" kafka:   bootstrap.servers: "kafka:9092"   # Base64 encoded truststore stored securely in Vault   truststore_vault_path: "secret/data/tenant-a/certs#truststore.jks"
+
+Use code with caution.
+
+
+2. How the Runtime Execution Works
+
+Because you are running in a shared Session Mode cluster without an operator, you must give your job a way to prove its identity to Vault when it boots up.
+
+Authentication: When you execute flink run, pass a low-privilege, short-lived Vault Token or an AppRole RoleID/SecretID as a command-line parameter.
+Bootstrap (open method): Inside your Flink application, before initializing your sources or sinks, connect to Vault using the token, read your versioned config.yaml, and swap the placeholders with real secrets.
+
+Conceptual Java Implementation
+
+java
+
+public class VaultConfigApp {     public static void main(String[] args) throws Exception {         ParameterTool cliArgs = ParameterTool.fromArgs(args);         String vaultToken = cliArgs.get("vault-token");          // 1. Read your bundled, versioned config file from the JAR resources         InputStream configStream = VaultConfigApp.class.getResourceAsStream("/config.yaml");         Map<String, Object> config = parseYaml(configStream);          // 2. Initialize your Vault Client         VaultEndpoint endpoint = new VaultEndpoint("https://example.com");         VaultClient vault = new VaultClient(endpoint, vaultToken);          // 3. Resolve placeholders dynamically on startup         String dbPassPath = (String) config.get("app.database.password_vault_path");         String actualPassword = vault.readSecret(dbPassPath);                  // 4. Resolve TrustStore (Write bytes to local execution directory)         String trustStoreBase64 = vault.readSecret("secret/data/tenant-a/certs#truststore.jks");         byte[] trustStoreBytes = Base64.getDecoder().decode(trustStoreBase64);         Files.write(Paths.get("/tmp/tenant-a-truststore.jks"), trustStoreBytes);          // 5. Build your Flink Topology using the fetched credentials         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();         // Configure Kafka / JDBC with actualPassword and /tmp/tenant-a-truststore.jks ...         env.execute("Tenant A Job");     } }
+
+Use code with caution.
+
+
+3. How to Submit the Job (flink run)
+
+Your CI/CD pipeline (which is tenant-isolated) serves as the broker. It fetches a short-lived token from Vault and passes it to the Flink cluster.
+
+bash
+
+# 1. Pipeline authenticates to Vault as Tenant A and gets a 10-minute token TENANT_A_TOKEN=$(vault token create -policy=tenant-a-policy -ttl=10m -field=token)  # 2. Pipeline submits the job jar (which has the versioned config.yaml baked inside) flink run \   -m https://cluster.domain \   /workspace/tenant-a-job-v2.1.0.jar \   --vault-token "${TENANT_A_TOKEN}"
+
+Use code with caution.
+
+
+Why This Perfectly Fixes Your Multi-Tenant Issue
+
+Version Control: If you roll back your code to version v1.0.0, the old config.yaml baked inside that older JAR is automatically used. It will still point to the correct Vault paths.
+Tenant Isolation: If Tenant B attempts to inspect Tenant A's running job configuration in the Flink Web UI, they will only see the command line arguments. Since the Vault token expired 10 minutes after submission, Tenant B cannot use it to steal Tenant A's secrets.
+Zero Shared Footprint: No secrets or truststores are stored permanently on the TaskManager disk or in shared OpenShift ConfigMaps. They exist entirely in the ephemeral memory space of Tenant A's isolated Flink slot.
+
+Would you like to see how to structure the Vault Policies to ensure Tenant A cannot read Tenant B's paths, or do you need a more robust example of handling the Truststore byte-writing logic inside Flink's initialization steps?
+
+Copied to clipboardFailed to copy to clipboard. Try again later.
+
+More
+
+
+you asked
+
+message time: 2026-09-11 00:00:00
+
+can i write a wrapper over the run command to better cotnrol the deployment in sesion mode?
+
+
+googlesearch response
+
+Yes, writing a wrapper script or a lightweight CLI tool is the standard enterprise pattern for managing multi-tenant deployments on a shared Flink session cluster without an operator.
+
+Because flink run natively lacks tenant awareness and security gating, a wrapper acts as a control plane proxy that intercepts the deployment request, safely fetches Vault tokens, injects versioned configurations, and enforces tenant isolation before talking to OpenShift.
+
+
+1. Architecture of a Secure Flink Deployment Wrapper
+
+The wrapper acts as a gatekeeper between the tenant engineer (or their CI/CD pipeline) and the OpenShift cluster.
+
+[Tenant Pipeline] ──(Calls Wrapper)──> [Wrapper Script]                                             │  1. Authenticates to Vault                                             │  2. Resolves Git/Config Versions                                             ▼ [Flink Shared Session Cluster] <──(Executes 'flink run')─┘
+
+
+2. Implementation: Production-Ready Bash Wrapper (flink-deploy.sh)
+
+You can provide this script to your tenant CI/CD pipelines (e.g., Tekton, Jenkins, GitLab CI). It abstracts the complexities of OpenShift routes, Vault authentication, and argument injection.
+
+bash
+
+#!/usr/bin/env bash set -euo pipefail  # Usage: ./flink-deploy.sh --tenant tenant-a --jar ./my-job.jar --env prod --version v2.1.0  # 1. Parse Arguments while [[ $# -gt 0 ]]; do   case $1 in     --tenant)  TENANT="$2"; shift 2 ;;     --jar)     JAR_PATH="$2"; shift 2 ;;     --env)     DEPLOY_ENV="$2"; shift 2 ;;     --version) CONFIG_VERSION="$2"; shift 2 ;;     *) echo "Unknown parameter: $1"; exit 1 ;;   esac done  echo "🚀 Starting secure deployment for Tenant: [${TENANT}] (Env: ${DEPLOY_ENV}, Config Version: ${CONFIG_VERSION})"  # 2. Dynamically Resolve Flink Target Route based on Environment # (Ensures pipelines don't have hardcoded cluster URLs) FLINK_URL=$(oc get route flink-session-route -n flink-shared-cluster -o jsonpath='{.spec.host}') FLINK_TARGET="https://${FLINK_URL}:443"  # 3. Vault Integration: Fetch a strict, short-lived, tenant-scoped token # Assumes the wrapper is running in an environment authenticated to Vault via OpenShift Auth echo "🔑 Requesting short-lived Vault token for ${TENANT}..." VAULT_TOKEN=$(vault token create \   -policy="policy-${TENANT}-${DEPLOY_ENV}" \   -ttl=5m \   -use-limit=2 \   -field=token)  # 4. Enforce Versioning Control # Pass the requested version to the job so it knows which Vault KV version or Git tag to pull echo "📦 Injecting configuration versioning parameters..."  # 5. Execute Isolated Flink Run # We pass the temporary token and versioning paths as runtime parameters. # The token expires in 5 minutes, preventing other tenants from reusing it. flink run \   -m "${FLINK_TARGET}" \   -D pipeline.name="${TENANT}-job-${CONFIG_VERSION}" \   "${JAR_PATH}" \   --vault.url "https://yourcompany.com" \   --vault.token "${VAULT_TOKEN}" \   --tenant.id "${TENANT}" \   --config.version "${CONFIG_VERSION}" \   --env "${DEPLOY_ENV}"  echo "✅ Job successfully submitted to shared session cluster."
+
+Use code with caution.
+
+
+3. How the Job Handles Versioning (Inside the Code)
+
+With the wrapper injecting --config.version "${CONFIG_VERSION}", your Flink job main method can utilize Vault's Key-Value (KV) Version 2 API natively to pull the matching configuration snapshot:
+
+java
+
+public static void main(String[] args) throws Exception {     ParameterTool parameters = ParameterTool.fromArgs(args);          String vaultToken = parameters.get("vault.token");     String tenant = parameters.get("tenant.id");     String version = parameters.get("config.version"); // e.g., "v2.1.0" or "4"          // Connect to Vault and query the specific version matching your code release     VaultV2SecretBackend secretBackend = new VaultV2SecretBackend("https://example.com", vaultToken);          // Vault KV V2 allows fetching specific versions of a secret payload     Map<String, String> resolvedSecrets = secretBackend.readSecret(         "secret/data/" + tenant + "/app-config",          version     );          // Initialize Truststore from byte array, build Flink topology... }
+
+Use code with caution.
+
+
+4. Advanced: Moving from Bash to a Python or Go Micro-Wrapper
+
+If your multi-tenant governance gets more complex, wrap flink run inside a lightweight Python script or a small Go binary. A compiled wrapper allows you to easily add:
+
+Pre-flight JAR validation: Ensure the tenant's JAR does not include forbidden dependencies or try to bypass your security classes.
+Flink Web UI masking: The wrapper can automatically submit jobs with encrypted parameters or log metadata to an external tracking tool (like Elastic or Splunk) so you have an audit trail of exactly who deployed what version to the shared Session Cluster.
+
+Would you like to see how to structure the Vault KV (Key-Value) Versioning layout to cleanly map to your release tags, or would it be more helpful to look at a Python-based wrapper example that can do deeper validation on the deployment?
+
+Copied to clipboardFailed to copy to clipboard. Try again later.
+
+More
